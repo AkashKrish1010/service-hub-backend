@@ -42,11 +42,11 @@ const ProviderProfileSchema = new mongoose.Schema(
       },
       coordinates: {
         type: [Number], // [longitude, latitude]
-        default: [-73.985130, 40.748817], // Default NYC Downtown
+        default: [80.2337, 13.0418], // Default Chennai Center
       },
       address: {
         type: String,
-        default: 'Downtown Area',
+        default: 'Chennai, Tamil Nadu',
       },
     },
     workingHours: {
@@ -56,8 +56,8 @@ const ProviderProfileSchema = new mongoose.Schema(
     },
     averageRating: {
       type: Number,
-      default: 4.8,
-      min: [1, 'Rating must be at least 1'],
+      default: 0,
+      min: [0, 'Rating cannot be negative'],
       max: [5, 'Rating cannot be more than 5'],
     },
     totalReviews: {
@@ -70,7 +70,7 @@ const ProviderProfileSchema = new mongoose.Schema(
     },
     isAvailable: {
       type: Boolean,
-      default: true,
+      default: false,
     },
   },
   {

@@ -49,26 +49,38 @@ exports.register = async (req, res, next) => {
       ? role
       : 'customer';
 
+    const isProvider = assignedRole === 'provider';
     const user = await User.create({
       name: trimmedName,
       email: trimmedEmail,
       password,
       phone: phone || '',
       role: assignedRole,
-      isApproved: true,
+      isApproved: isProvider ? false : true, // Providers MUST be approved by admin before active dispatch
       isVerified: true,
       profileImage: '', // Always default to icon for all new accounts!
     });
 
     // If role is provider, initialize default provider profile
-    if (assignedRole === 'provider') {
+    if (isProvider) {
+      const selectedCategory = (req.body.category || 'General Services').trim();
+      const coords = req.body.lng && req.body.lat ? [Number(req.body.lng), Number(req.body.lat)] : [80.2337, 13.0418];
       await ProviderProfile.create({
         userId: user._id,
-        category: 'General Services',
-        bio: 'Professional service technician providing high quality repairs.',
-        experience: '1+ years',
-        hourlyRate: 40,
-        workingHours: { open: '08:00 AM', close: '07:00 PM', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+        category: selectedCategory,
+        bio: (req.body.bio || `Certified ${selectedCategory} technician providing high quality repairs.`).trim(),
+        experience: req.body.experience || '1+ years',
+        hourlyRate: Number(req.body.hourlyRate) || 40,
+        averageRating: 0,
+        totalReviews: 0,
+        totalEarnings: 0,
+        isAvailable: false,
+        location: {
+          type: 'Point',
+          coordinates: coords,
+          address: req.body.address || 'Chennai, Tamil Nadu',
+        },
+        workingHours: { open: '08:00 AM', close: '07:00 PM', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] },
       });
     }
 
@@ -140,25 +152,36 @@ exports.login = async (req, res, next) => {
           : baseEmail;
       }
 
+      const isProvider = assignedRole === 'provider';
       user = await User.create({
         name: displayName,
         email: userEmail,
         password: password,
         phone: '',
         role: assignedRole,
-        isApproved: true,
+        isApproved: isProvider ? false : true, // Providers must wait for admin approval
         isVerified: true,
         profileImage: '', // Always default to icon for all new accounts!
       });
 
-      if (assignedRole === 'provider') {
+      if (isProvider) {
+        const selectedCategory = (req.body.category || 'General Services').trim();
         await ProviderProfile.create({
           userId: user._id,
-          category: 'General Services',
-          bio: 'Verified service technician.',
+          category: selectedCategory,
+          bio: `Certified ${selectedCategory} technician.`,
           experience: '1+ years',
           hourlyRate: 40,
-          workingHours: { open: '08:00 AM', close: '07:00 PM', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+          averageRating: 0,
+          totalReviews: 0,
+          totalEarnings: 0,
+          isAvailable: false,
+          location: {
+            type: 'Point',
+            coordinates: [80.2337, 13.0418],
+            address: 'Chennai, Tamil Nadu',
+          },
+          workingHours: { open: '08:00 AM', close: '07:00 PM', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] },
         });
       }
 

@@ -103,7 +103,7 @@ exports.saveLocation = async (req, res, next) => {
     const location = {
       type: 'Point',
       coordinates: [parseFloat(lng), parseFloat(lat)], // GeoJSON format: [longitude, latitude]
-      address: address || 'Service Location',
+      address: (address || 'Chennai, Tamil Nadu').trim(),
     };
 
     const profile = await ProviderProfile.findOneAndUpdate(
@@ -111,6 +111,8 @@ exports.saveLocation = async (req, res, next) => {
       { location },
       { new: true, upsert: true }
     );
+
+    await User.findByIdAndUpdate(req.user.id, { address: location.address });
 
     res.status(200).json({
       success: true,
@@ -122,46 +124,77 @@ exports.saveLocation = async (req, res, next) => {
   }
 };
 
-// @desc    Get nearby providers (Geospatial query)
-// @route   GET /api/provider/nearby?lat=&lng=&radius=&category=
+// @desc    Get nearby providers (Geospatial & location text search)
+// @route   GET /api/provider/nearby?lat=&lng=&radius=&category=&search=
 // @access  Public
 exports.getNearbyProviders = async (req, res, next) => {
   try {
-    const { lat, lng, radius = 25, category } = req.query;
+    const { lat, lng, radius = 50, category, search, q, location: locQuery } = req.query;
+    const searchTerm = (search || q || locQuery || '').trim();
 
-    const query = { isAvailable: true };
+    // Query only approved providers
+    const approvedUsers = await User.find({ role: 'provider', isApproved: true }).select('_id name');
+    const approvedUserIds = approvedUsers.map((u) => u._id);
+
+    const baseQuery = { userId: { $in: approvedUserIds } };
 
     if (category && category !== 'All') {
-      query.category = new RegExp(category, 'i');
+      baseQuery.category = new RegExp(category, 'i');
     }
 
-    // Only approved providers
-    const approvedUsers = await User.find({ role: 'provider', isApproved: true }).select('_id');
-    const approvedUserIds = approvedUsers.map((u) => u._id);
-    query.userId = { $in: approvedUserIds };
+    let providers = [];
 
-    let providers;
+    // 1. Text/Location Search takes precedence (e.g. "Mangadu", "Plumbing", "Kumar")
+    if (searchTerm) {
+      const nameMatchingUserIds = approvedUsers
+        .filter((u) => u.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        .map((u) => u._id);
 
-    if (lat && lng) {
-      const maxDistanceMeters = parseFloat(radius) * 1000; // km to meters
-      query.location = {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)],
-          },
-          $maxDistance: maxDistanceMeters,
-        },
+      const searchQuery = {
+        ...baseQuery,
+        $or: [
+          { 'location.address': { $regex: searchTerm, $options: 'i' } },
+          { category: { $regex: searchTerm, $options: 'i' } },
+          { bio: { $regex: searchTerm, $options: 'i' } },
+          { userId: { $in: nameMatchingUserIds } },
+        ],
       };
 
-      providers = await ProviderProfile.find(query)
+      providers = await ProviderProfile.find(searchQuery)
         .populate('userId', 'name email phone profileImage isVerified isApproved')
-        .limit(30);
-    } else {
-      // Fallback if coordinates are not sent
-      providers = await ProviderProfile.find(query)
+        .sort({ isAvailable: -1, averageRating: -1 })
+        .limit(50);
+    } else if (lat && lng && !isNaN(parseFloat(lat)) && !isNaN(parseFloat(lng))) {
+      // 2. Geospatial query with generous radius
+      const maxDistanceMeters = (parseFloat(radius) || 50) * 1000;
+      try {
+        const geoQuery = {
+          ...baseQuery,
+          location: {
+            $near: {
+              $geometry: {
+                type: 'Point',
+                coordinates: [parseFloat(lng), parseFloat(lat)],
+              },
+              $maxDistance: maxDistanceMeters,
+            },
+          },
+        };
+
+        providers = await ProviderProfile.find(geoQuery)
+          .populate('userId', 'name email phone profileImage isVerified isApproved')
+          .limit(50);
+      } catch (geoErr) {
+        console.warn('Geospatial query error, falling back to all approved providers:', geoErr);
+      }
+    }
+
+    // 3. Fallback: if no providers found by location or coordinates weren't supplied, return all approved
+    if (!providers || providers.length === 0) {
+      providers = await ProviderProfile.find(baseQuery)
         .populate('userId', 'name email phone profileImage isVerified isApproved')
-        .limit(30);
+        .sort({ isAvailable: -1, averageRating: -1 })
+        .limit(50);
     }
 
     res.status(200).json({
@@ -201,9 +234,9 @@ exports.getDashboardStats = async (req, res, next) => {
         completedBookings,
         pendingBookingsCount: pendingList.length,
         totalEarnings: totalEarnings || (profile ? profile.totalEarnings : 0),
-        averageRating: profile ? profile.averageRating : 4.8,
+        averageRating: profile ? (profile.averageRating ?? 0) : 0,
         totalReviews: profile ? profile.totalReviews : 0,
-        isAvailable: profile ? profile.isAvailable : true,
+        isAvailable: profile ? Boolean(profile.isAvailable) : false,
       },
     });
   } catch (err) {

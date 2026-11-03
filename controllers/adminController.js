@@ -131,6 +131,12 @@ exports.approveOrRejectProvider = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Provider user not found' });
     }
 
+    // Update provider profile availability
+    await ProviderProfile.findOneAndUpdate(
+      { userId: user._id },
+      { isAvailable: Boolean(isApproved) }
+    );
+
     // Send notification to provider
     await Notification.create({
       userId: user._id,
@@ -140,6 +146,11 @@ exports.approveOrRejectProvider = async (req, res, next) => {
         : 'Your service provider registration requires additional verification. Please contact support.',
       type: 'admin',
     });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(user._id.toString()).emit('user_updated', { isApproved: Boolean(isApproved) });
+    }
 
     res.status(200).json({
       success: true,
