@@ -2,6 +2,92 @@ const Review = require('../models/Review');
 const ProviderProfile = require('../models/ProviderProfile');
 const Booking = require('../models/Booking');
 
+// Helper to compute natural language sentiment analysis percentage & label
+const calculateReviewSentiment = (rating, text = '', serviceQuality = 5, providerBehavior = 5) => {
+  const baseScores = { 5: 88, 4: 75, 3: 55, 2: 35, 1: 15 };
+  let score = baseScores[Math.round(Number(rating))] || 75;
+
+  const cleanText = (text || '').toLowerCase();
+
+  const positiveWords = [
+    'great', 'excellent', 'amazing', 'perfect', 'swiftly', 'clean', 'spotless',
+    'friendly', 'fast', 'sturdy', 'recommend', 'punctual', 'professional',
+    'master', 'love', 'helpful', 'thorough', 'quick', 'skilled', 'awesome',
+    'polite', 'best', 'wonderful', 'satisfied', 'neat', 'superb', 'prompt',
+    'efficient', 'careful', 'expert', 'flawless', 'reliable', 'honest'
+  ];
+
+  const negativeWords = [
+    'bad', 'terrible', 'horrible', 'poor', 'leak', 'slow', 'late', 'dirty',
+    'rude', 'unprofessional', 'worst', 'damage', 'waste', 'broken', 'scam',
+    'unresponsive', 'overpriced', 'disaster', 'messy', 'careless', 'delay',
+    'faulty', 'incomplete', 'arrogant', 'unpleasant'
+  ];
+
+  let positiveHits = 0;
+  positiveWords.forEach((word) => {
+    if (cleanText.includes(word)) positiveHits++;
+  });
+
+  let negativeHits = 0;
+  negativeWords.forEach((word) => {
+    if (cleanText.includes(word)) negativeHits++;
+  });
+
+  // Adjust score based on sentiment keywords
+  score += Math.min(positiveHits * 3, 12);
+  score -= Math.min(negativeHits * 6, 25);
+
+  // Sub-rating adjustments
+  const subAvg = (Number(serviceQuality || 5) + Number(providerBehavior || 5)) / 2;
+  if (subAvg >= 4.5) score += 3;
+  else if (subAvg < 3) score -= 5;
+
+  // Clamp to [5, 100]
+  score = Math.max(5, Math.min(100, Math.round(score)));
+
+  let label = 'Positive';
+  if (score < 50) label = 'Negative';
+  else if (score < 75) label = 'Neutral';
+
+  return { sentimentScore: score, sentimentLabel: label };
+};
+
+// Helper: Calculate aggregate sentiment statistics from a list of reviews
+const aggregateSentimentStats = (reviews = []) => {
+  if (!reviews || reviews.length === 0) {
+    return {
+      averagePercentage: 0,
+      positivePercentage: 0,
+      neutralPercentage: 0,
+      negativePercentage: 0,
+      label: 'New Provider',
+      totalReviews: 0,
+    };
+  }
+
+  const total = reviews.length;
+  const sumScores = reviews.reduce((sum, r) => sum + (r.sentimentScore != null ? r.sentimentScore : 90), 0);
+  const averagePercentage = Math.round(sumScores / total);
+
+  const positiveCount = reviews.filter((r) => (r.sentimentLabel || 'Positive') === 'Positive').length;
+  const neutralCount = reviews.filter((r) => r.sentimentLabel === 'Neutral').length;
+  const negativeCount = reviews.filter((r) => r.sentimentLabel === 'Negative').length;
+
+  let label = 'Positive';
+  if (averagePercentage < 50) label = 'Negative';
+  else if (averagePercentage < 75) label = 'Neutral';
+
+  return {
+    averagePercentage,
+    positivePercentage: Math.round((positiveCount / total) * 100),
+    neutralPercentage: Math.round((neutralCount / total) * 100),
+    negativePercentage: Math.round((negativeCount / total) * 100),
+    label,
+    totalReviews: total,
+  };
+};
+
 // @desc    Create review for completed booking
 // @route   POST /api/reviews
 // @access  Private (Customer)
@@ -27,6 +113,14 @@ exports.createReview = async (req, res, next) => {
       }
     }
 
+    // Compute sentiment analysis
+    const { sentimentScore, sentimentLabel } = calculateReviewSentiment(
+      rating,
+      reviewText,
+      serviceQuality,
+      providerBehavior
+    );
+
     const review = await Review.create({
       bookingId,
       customerId: req.user.id,
@@ -35,6 +129,8 @@ exports.createReview = async (req, res, next) => {
       reviewText,
       serviceQuality: serviceQuality || 5,
       providerBehavior: providerBehavior || 5,
+      sentimentScore,
+      sentimentLabel,
     });
 
     // Recalculate provider average rating across ALL reviews for this provider
@@ -51,7 +147,14 @@ exports.createReview = async (req, res, next) => {
       { new: true }
     );
 
-    res.status(201).json({ success: true, data: review, newRating: roundedRating });
+    const sentimentStats = aggregateSentimentStats(reviews);
+
+    res.status(201).json({
+      success: true,
+      data: review,
+      newRating: roundedRating,
+      sentiment: sentimentStats,
+    });
   } catch (err) {
     next(err);
   }
@@ -74,7 +177,14 @@ exports.getProviderReviews = async (req, res, next) => {
       .populate('customerId', 'name profileImage')
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, count: reviews.length, data: reviews });
+    const sentimentStats = aggregateSentimentStats(reviews);
+
+    res.status(200).json({
+      success: true,
+      count: reviews.length,
+      sentiment: sentimentStats,
+      data: reviews,
+    });
   } catch (err) {
     next(err);
   }

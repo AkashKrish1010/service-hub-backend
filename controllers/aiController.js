@@ -377,8 +377,22 @@ exports.providerPerformanceInsights = async (req, res, next) => {
 
     const totalEarned = completedBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
 
+    // Calculate dynamic sentiment percentage from reviews
+    const totalReviewsCount = reviews.length;
+    let avgSentimentPct = 96;
+    if (totalReviewsCount > 0) {
+      const sumScores = reviews.reduce((sum, r) => sum + (r.sentimentScore != null ? r.sentimentScore : 92), 0);
+      avgSentimentPct = Math.round(sumScores / totalReviewsCount);
+    } else if (profile && profile.averageRating > 0) {
+      avgSentimentPct = Math.round((profile.averageRating / 5) * 100);
+    } else {
+      avgSentimentPct = 0;
+    }
+
     const reviewsData = reviews.map((r) => ({
       rating: r.rating,
+      sentimentScore: r.sentimentScore || 95,
+      sentimentLabel: r.sentimentLabel || 'Positive',
       comment: r.reviewText,
       serviceQuality: r.serviceQuality || 5,
       providerBehavior: r.providerBehavior || 5,
@@ -391,6 +405,7 @@ exports.providerPerformanceInsights = async (req, res, next) => {
       hourlyRate: profile ? profile.hourlyRate : 40,
       averageRating: profile ? profile.averageRating : 5.0,
       totalReviews: profile ? profile.totalReviews : reviews.length,
+      sentimentPercentage: avgSentimentPct,
       completedJobs: completedBookings.length,
       totalRevenue: totalEarned,
       customerReviews: reviewsData,
@@ -404,14 +419,16 @@ Generate actionable insights to help this provider improve their customer rating
 Provide:
 1. Executive summary of their customer reputation.
 2. Overall sentiment (Positive, Neutral, or Needs Attention).
-3. 2-3 specific strengths highlighted in customer feedback.
-4. 1-2 areas of improvement or potential customer friction points based on reviews or rating gaps.
-5. 3 concrete, practical actionable tips on how to improve more and earn higher revenue (e.g. communication, photo documentation, arrival punctuality, pricing upsells).
+3. Positive sentiment percentage as an integer (e.g. ${avgSentimentPct}).
+4. 2-3 specific strengths highlighted in customer feedback.
+5. 1-2 areas of improvement or potential customer friction points based on reviews or rating gaps.
+6. 3 concrete, practical actionable tips on how to improve more and earn higher revenue (e.g. communication, photo documentation, arrival punctuality, pricing upsells).
 
 Output a valid JSON object ONLY with the following exact structure:
 {
   "summary": "Concise 2-sentence summary of customer perception and performance.",
   "sentiment": "Positive" | "Neutral" | "Needs Attention",
+  "sentimentPercentage": ${avgSentimentPct},
   "strengths": [
     "Specific customer-praised strength 1",
     "Specific customer-praised strength 2"
@@ -436,6 +453,7 @@ STRICT RULES: Output raw JSON only. Do not wrap in markdown or code blocks. Stri
     const defaultFallback = {
       summary: `${user ? user.name : 'Your profile'} maintains a strong ${profile ? profile.averageRating : 5.0}-star average across ${profile ? profile.totalReviews : reviews.length} customer reviews with consistent delivery on Service Hub.`,
       sentiment: (profile && profile.averageRating >= 4.5) ? 'Positive' : 'Neutral',
+      sentimentPercentage: avgSentimentPct || 96,
       strengths: [
         'Consistently high job completion reliability and positive direct feedback',
         'Transparent hourly rate structure and dependable customer interactions',
@@ -465,6 +483,7 @@ STRICT RULES: Output raw JSON only. Do not wrap in markdown or code blocks. Stri
       success: true,
       data: {
         ...parsedInsights,
+        sentimentPercentage: parsedInsights.sentimentPercentage != null ? parsedInsights.sentimentPercentage : avgSentimentPct,
         currentRating: profile ? profile.averageRating : 5.0,
         totalReviews: profile ? profile.totalReviews : reviews.length,
         completedJobs: completedBookings.length,

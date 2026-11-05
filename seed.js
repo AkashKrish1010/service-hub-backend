@@ -343,6 +343,8 @@ const seedData = async (dontExit = false) => {
         reviewText: 'Arrived right on time in T. Nagar! Fixed the persistent pipe leak under our sink swiftly and left the workspace spotless.',
         serviceQuality: 5,
         providerBehavior: 5,
+        sentimentScore: 98,
+        sentimentLabel: 'Positive',
       },
       {
         bookingId: completedCarpentryBooking._id,
@@ -352,6 +354,8 @@ const seedData = async (dontExit = false) => {
         reviewText: 'Master craftsman quality! The custom shelves are sturdy and the alignment of the closet door is perfect.',
         serviceQuality: 5,
         providerBehavior: 5,
+        sentimentScore: 97,
+        sentimentLabel: 'Positive',
       },
     ]);
 
